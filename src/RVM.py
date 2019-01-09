@@ -16,11 +16,13 @@ class RVM:
         self.X_train = None
 
         self.threshold_alpha = 1e9
+        
+        self.removed_bias = False
 
 
     def kernel(self, x, y):
         #return linear_kernel(x, y)
-        return rbf_kernel(x, y, None)
+        return rbf_kernel(x, y, 0.01)
 
     #def linear_kernel(self, x, y):
     #    return np.dot(x, y.T)
@@ -57,27 +59,44 @@ class RVM:
         mask = self.alphas < self.threshold_alpha
 
         # Not remove bias.
-        mask[0] = True
+        #mask[0] = True
 
         self.alphas = self.alphas[mask]
         self.phi = self.phi[:, mask]
-        self.X_train = self.X_train[mask[1:]]
-
+        
+        if not self.removed_bias:
+            self.X_train = self.X_train[mask[1:]]
+        else:
+            self.X_train = self.X_train[mask]
+            
+        if not mask[0] and not self.removed_bias:
+            self.removed_bias = True
+            print("bias removed")
+        
+            
     def em(self):
-
-        #while(True):
-        for i in range(100):
-            print(i)
-
+        
+        difference = 5
+        
+        while(True):
+            
+            old_alphas = np.copy(self.alphas)
+            
             sigma_posterior, mu_posterior = self.calc_posterior()
 
             gammas = 1 - self.alphas * np.diag(sigma_posterior)
             self.alphas = gammas / (mu_posterior**2)
 
-            """# Update sigma.
+            # Update sigma.
             N = self.alphas.shape[0] - 1
             self.sigma = (N - np.sum(gammas))/(
-                    np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))"""
+                    np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))
+            #print(self.sigma)
+            
+            difference = np.amax(np.abs(self.alphas - old_alphas))
+            
+            if difference < 1e-3:
+                break
 
             self.prune()
 
@@ -85,10 +104,14 @@ class RVM:
     def predict(self, X):
 
         sigma_posterior, mu_posterior = self.calc_posterior()
+        
+        print("Nb relevant features : ", mu_posterior.shape[0])
 
         phi = self.kernel(X, self.X_train)
-        bias_trick = np.ones((N,1))
-        phi = np.hstack((bias_trick, phi))
+        
+        if not self.removed_bias:
+            bias_trick = np.ones((N,1))
+            phi = np.hstack((bias_trick, phi))
 
         y = np.dot(phi, mu_posterior)
         
@@ -104,10 +127,9 @@ class RVM:
 N = 50
 
 X = np.linspace(0,10,N)
-Y = 2*X
+Y = 2*X + 100
 T = Y + np.random.randn(N)
 
-Y = Y.reshape(N,1)
 X = X.reshape(N,1)
 
 #plt.scatter(X,T)
@@ -119,5 +141,6 @@ rvm.fit(X,T)
 
 y_pred = rvm.predict(X)
 
-plt.scatter(X, y_pred)
+plt.plot(X, y_pred)
+plt.scatter(X, T, c='r')
 plt.show()
