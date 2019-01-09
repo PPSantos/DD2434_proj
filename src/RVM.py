@@ -1,6 +1,6 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-from sklearn.metrics.pairwise import linear_kernel
+from sklearn.metrics.pairwise import linear_kernel, rbf_kernel
 
 class RVM:
 
@@ -13,10 +13,14 @@ class RVM:
 
         self.phi = None
         self.T = None
+        self.X_train = None
+
+        self.threshold_alpha = 1e9
 
 
     def kernel(self, x, y):
-        return linear_kernel(x, y)
+        #return linear_kernel(x, y)
+        return rbf_kernel(x, y, None)
 
     #def linear_kernel(self, x, y):
     #    return np.dot(x, y.T)
@@ -25,7 +29,8 @@ class RVM:
     def fit(self, X, T):
 
         N = X.shape[0]
-        self.alphas = 1 * np.ones(N+1)
+        self.alphas = 1e-6 * np.ones(N+1)
+        self.X_train = X
 
         # Calculate phi matrix.
         phi = self.kernel(X,X)
@@ -38,7 +43,7 @@ class RVM:
     def calc_posterior(self):
 
         if self.phi.any == None or self.alphas.any == None or self.sigma == None:
-            raise ValueError('Not initialized attributes.')
+            raise ValueError('Uninitialized attributes.')
 
         phi = self.phi
         alphas = self.alphas
@@ -48,21 +53,52 @@ class RVM:
         mu_posterior = (1/sigma) * np.dot(sigma_posterior, np.dot(phi.T, T))
         return sigma_posterior, mu_posterior
 
+    def prune(self):
+        mask = self.alphas < self.threshold_alpha
+
+        # Not remove bias.
+        mask[0] = True
+
+        self.alphas = self.alphas[mask]
+        self.phi = self.phi[:, mask]
+        self.X_train = self.X_train[mask[1:]]
 
     def em(self):
 
         #while(True):
-        for _ in range(1):
+        for i in range(100):
+            print(i)
 
             sigma_posterior, mu_posterior = self.calc_posterior()
 
-            gammas = 1 - np.diag(self.alphas) * sigma_posterior
+            gammas = 1 - self.alphas * np.diag(sigma_posterior)
             self.alphas = gammas / (mu_posterior**2)
 
-            # Update sigma.
+            """# Update sigma.
             N = self.alphas.shape[0] - 1
             self.sigma = (N - np.sum(gammas))/(
-                    np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))
+                    np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))"""
+
+            self.prune()
+
+
+    def predict(self, X):
+
+        sigma_posterior, mu_posterior = self.calc_posterior()
+
+        phi = self.kernel(X, self.X_train)
+        bias_trick = np.ones((N,1))
+        phi = np.hstack((bias_trick, phi))
+
+        y = np.dot(phi, mu_posterior)
+        
+        """if eval_MSE:
+            MSE = (1/self.beta_) + np.dot(phi, np.dot(self.sigma_, phi.T))
+            return y, MSE[:, 0]
+        else:
+            return y"""
+        
+        return y
 
 # test.
 N = 50
@@ -80,3 +116,8 @@ X = X.reshape(N,1)
 rvm = RVM()
 
 rvm.fit(X,T)
+
+y_pred = rvm.predict(X)
+
+plt.scatter(X, y_pred)
+plt.show()
