@@ -160,9 +160,9 @@ class RVM:
 
             # Update sigma.
             if self.update_sigma:
-                N = self.alphas.shape[0] - 1
-                self.sigma = (N - np.sum(gammas))/(
-                        np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))
+                #N = self.alphas.shape[0] - 1
+                self.sigma = (self.N - np.sum(gammas))/(
+                        np.sum((self.T - np.dot(self.phi, mu_posterior)) ** 2))
             
             self.prune()
 
