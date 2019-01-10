@@ -195,10 +195,6 @@ class RVM:
 
         y = np.dot(phi, mu_posterior)
         
-        """if eval_MSE:
-            MSE = (1/self.beta_) + np.dot(phi, np.dot(self.sigma_, phi.T))
-            return y, MSE[:, 0]
-        else:
-            return y"""
+        sigma = self.sigma + np.dot(phi, np.dot(sigma_posterior, phi.T))
         
-        return y
+        return y, sigma
