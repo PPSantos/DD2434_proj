@@ -12,6 +12,7 @@ class RVM:
         alpha=1e-6,
         threshold_alpha=1e5,
         sigma=1,
+        update_sigma=False,
         verbose=False
         ):
 
@@ -33,8 +34,12 @@ class RVM:
         # Alphas pruning threshold.
         self.threshold_alpha = threshold_alpha
 
+        self.update_sigma = update_sigma
+        self.verbose = verbose
+
         # Prior variances (weights).
         self.alphas = None
+        self.old_alphas = None
 
         # 'Design matrix'.
         self.phi = None
@@ -50,8 +55,6 @@ class RVM:
         
         # True if bias was pruned.
         self.removed_bias = False
-
-        self.verbose = verbose
 
 
     def get_relevance_vectors(self):
@@ -99,7 +102,7 @@ class RVM:
 
         self.alphas = self.alpha * np.ones(self.N+1)
 
-        # Calculate phi matrix and append bias.
+        # Calculate phi matrix and append bias trick column.
         phi = self.kernel(X,X)
         bias_trick = np.ones((self.N,1))
         self.phi = np.hstack((bias_trick, phi))
@@ -128,6 +131,7 @@ class RVM:
         mask = self.alphas < self.threshold_alpha
 
         self.alphas = self.alphas[mask]
+        self.old_alphas = self.old_alphas[mask]
         self.phi = self.phi[:, mask]
         
         if not self.removed_bias:
@@ -147,7 +151,7 @@ class RVM:
         """
         while(True):
             
-            old_alphas = np.copy(self.alphas)
+            self.old_alphas = np.copy(self.alphas)
             
             sigma_posterior, mu_posterior = self.calc_posterior()
 
@@ -155,21 +159,19 @@ class RVM:
             self.alphas = gammas / (mu_posterior**2)
 
             # Update sigma.
-            '''N = self.alphas.shape[0] - 1
-            self.sigma = (N - np.sum(gammas))/(
-                    np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))
-            #print(self.sigma)
-            '''
+            if self.update_sigma:
+                N = self.alphas.shape[0] - 1
+                self.sigma = (N - np.sum(gammas))/(
+                        np.sum((T - np.dot(self.phi, mu_posterior)) ** 2))
             
-            difference = np.amax(np.abs(self.alphas - old_alphas))
+            self.prune()
+
+            difference = np.amax(np.abs(self.alphas - self.old_alphas))
             
             if difference < self.em_tol:
                 if self.verbose:
                     print("EM finished")
                 break
-
-            # TODO: probably it makes difference to prune b4 or after the EM condition
-            self.prune()
 
 
     def predict(self, X):
