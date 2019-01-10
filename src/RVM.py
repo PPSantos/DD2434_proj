@@ -1,92 +1,150 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-from sklearn.metrics.pairwise import linear_kernel, rbf_kernel
+from sklearn.metrics.pairwise import linear_kernel, rbf_kernel, polynomial_kernel
 
 class RVM:
 
-    def __init__(self):
+    def __init__(
+        self,
+        kernel='rbf',
+        coef0=0.01,
+        em_tol=1e-3,
+        alpha=1e-6,
+        threshold_alpha=1e5,
+        sigma=1,
+        verbose=False
+        ):
 
-        # Prior variance.
-        self.alphas = None
+        # Kernel function.
+        self.kernel_type = kernel
+
+        # Kernel coefficient.
+        self.coef0 = coef0
+
         # Likelihood variance.
-        self.sigma = 0.01**2
+        self.sigma = sigma
 
+        # EM stop condition tolerance.
+        self.em_tol = em_tol
+
+        # Alphas prior variance.
+        self.alpha = alpha
+
+        # Alphas pruning threshold.
+        self.threshold_alpha = threshold_alpha
+
+        # Prior variances (weights).
+        self.alphas = None
+
+        # 'Design matrix'.
         self.phi = None
-        self.T = None
-        self.X_train = None
 
-        self.threshold_alpha = 1e5
+        # Targets.
+        self.T = None
+
+        # Relevance vectors.
+        self.relevance_vec = None
+
+        # Number of training points.
+        self.N = None
         
+        # True if bias was pruned.
         self.removed_bias = False
+
+        self.verbose = verbose
+
+
+    def get_relevance_vectors(self):
+        return self.relevance_vec
 
 
     def kernel(self, x, y):
-        #return linear_kernel(x, y)
-        #return rbf_kernel(x, y, 0.1)
-        return self.linear_spline_kernel(x, y)
+        """
+            Applies kernel function.
+        """
+        if self.kernel_type == 'rbf':
+            return rbf_kernel(x, y, self.coef0)
+        elif self.kernel_type == 'linear':
+            return linear_kernel(x, y)
+        elif self.kernel_type == 'linear_spline':
+            return self.linear_spline_kernel(x, y)
+        else:
+            raise ValueError('Undefined kernel.')
+
     
     def linear_spline_kernel(self, X, Y):
+        """
+            Linear spline kernel.
+        """
         phi = np.zeros((X.shape[0], Y.shape[0]))
         
         for i in range(phi.shape[0]):
             for j in range(phi.shape[1]):
                 x = X[i]
                 y = Y[j]
-                phi[i,j] = 1 + x*y + x*y*min(x,y) - ((x+y)*min(x,y)**2)/2 + np.power(min(x,y),3)/3
+                phi[i,j] = 1 + x*y + x*y*min(x,y) - \
+                ((x+y)*min(x,y)**2)/2 + np.power(min(x,y),3)/3
         
         return phi
-    #def linear_kernel(self, x, y):
-    #    return np.dot(x, y.T)
 
 
     def fit(self, X, T):
+        """
+            Train.
+        """
 
-        N = X.shape[0]
-        self.alphas = 1e-6 * np.ones(N+1)
-        self.X_train = X
-
-        # Calculate phi matrix.
-        phi = self.kernel(X,X)
-        bias_trick = np.ones((N,1))
-        self.phi = np.hstack((bias_trick, phi))
+        self.N = X.shape[0]
+        self.relevance_vec = X
         self.T = T
+
+        self.alphas = self.alpha * np.ones(self.N+1)
+
+        # Calculate phi matrix and append bias.
+        phi = self.kernel(X,X)
+        bias_trick = np.ones((self.N,1))
+        self.phi = np.hstack((bias_trick, phi))
 
         self.em()
 
     def calc_posterior(self):
-
-        if self.phi.any == None or self.alphas.any == None or self.sigma == None:
-            raise ValueError('Uninitialized attributes.')
+        """
+            Calculate posterior.
+        """
 
         phi = self.phi
         alphas = self.alphas
         sigma = self.sigma
+        T = self.T
 
         sigma_posterior = np.linalg.inv((1/sigma) * np.dot(phi.T, phi) + np.diag(alphas))
         mu_posterior = (1/sigma) * np.dot(sigma_posterior, np.dot(phi.T, T))
+
         return sigma_posterior, mu_posterior
 
     def prune(self):
+        """
+            Pruning based on alpha values.
+        """
         mask = self.alphas < self.threshold_alpha
-
-        # Not remove bias.
-        #mask[0] = True
 
         self.alphas = self.alphas[mask]
         self.phi = self.phi[:, mask]
         
         if not self.removed_bias:
-            self.X_train = self.X_train[mask[1:]]
+            self.relevance_vec = self.relevance_vec[mask[1:]]
         else:
-            self.X_train = self.X_train[mask]
+            self.relevance_vec = self.relevance_vec[mask]
             
         if not mask[0] and not self.removed_bias:
             self.removed_bias = True
-            print("bias removed")
+            if self.verbose:
+                print("Bias removed")
         
             
     def em(self):
-        
+        """
+            EM.
+        """
         while(True):
             
             old_alphas = np.copy(self.alphas)
@@ -105,29 +163,32 @@ class RVM:
             
             difference = np.amax(np.abs(self.alphas - old_alphas))
             
-            if difference < 1e-3:
-                print("EM finished")
+            if difference < self.em_tol:
+                if self.verbose:
+                    print("EM finished")
                 break
 
+            # TODO: probably it makes difference to prune b4 or after the EM condition
             self.prune()
-            
-    def get_relevance_vectors(self):
-        return self.X_train
 
 
     def predict(self, X):
-
+        """
+            Predict.
+        """
         sigma_posterior, mu_posterior = self.calc_posterior()
         
         nb_relev_vect = mu_posterior.shape[0]
         if not self.removed_bias :
             nb_relev_vect -= 1
-        print("Nb relevance vectors : ", nb_relev_vect)
 
-        phi = self.kernel(X, self.X_train)
+        if self.verbose:
+            print("Number of relevance vectors : ", nb_relev_vect)
+
+        phi = self.kernel(X, self.relevance_vec)
         
         if not self.removed_bias:
-            bias_trick = np.ones((N,1))
+            bias_trick = np.ones((self.N, 1))
             phi = np.hstack((bias_trick, phi))
 
         y = np.dot(phi, mu_posterior)
@@ -139,35 +200,3 @@ class RVM:
             return y"""
         
         return y
-
-# test.
-N = 500
-
-X = np.linspace(-10,10,N)
-#Y = 2*X + 100
-Y = np.sinc(X)
-T = Y + np.random.randn(N) * 0.01**2
-
-X = X.reshape(N,1)
-
-#plt.scatter(X,T)
-#plt.show()
-
-plt.scatter(X, T)
-plt.show()
-
-rvm = RVM()
-
-rvm.fit(X,T)
-
-relevance_vect = rvm.get_relevance_vectors()
-indexes_relev_vect = [i for i,x in enumerate(X) if x in relevance_vect]
-
-y_pred = rvm.predict(X)
-
-
-
-plt.plot(X, y_pred, c='r')
-plt.scatter(X, T)
-#plt.scatter(relevance_vect, T[indexes_relev_vect], c='g', marker='X', linewidth=12)
-plt.show()
