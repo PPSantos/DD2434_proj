@@ -71,6 +71,8 @@ class RVM:
             return linear_kernel(x, y)
         elif self.kernel_type == 'linear_spline':
             return self.linear_spline_kernel(x, y)
+        elif self.kernel_type == 'exponential':
+            return self.exponential_kernel(x, y)
         else:
             raise ValueError('Undefined kernel.')
 
@@ -89,6 +91,21 @@ class RVM:
                 ((x+y)*min(x,y)**2)/2 + np.power(min(x,y),3)/3
         
         return phi
+    
+    def exponential_kernel(self, X, Y):
+        
+        phi = np.zeros((X.shape[0], Y.shape[0]))
+        
+        for i in range(phi.shape[0]):
+            for j in range(phi.shape[1]):
+                x_1 = X[i, 0]
+                x_2 = X[i, 1]
+                y_1 = Y[j, 0]
+                y_2 = Y[j, 1]
+                phi[i,j] = np.exp(-997e-4*(x_1-y_1)**2 - 2e-4*(x_2-y_2)**2)
+        
+        return phi
+        
 
 
     def fit(self, X, T):
@@ -190,7 +207,7 @@ class RVM:
         phi = self.kernel(X, self.relevance_vec)
         
         if not self.removed_bias:
-            bias_trick = np.ones((self.N, 1))
+            bias_trick = np.ones((X.shape[0], 1))
             phi = np.hstack((bias_trick, phi))
 
         y = np.dot(phi, mu_posterior)
