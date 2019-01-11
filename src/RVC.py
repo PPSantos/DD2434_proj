@@ -4,7 +4,11 @@ from scipy.special import expit
 from sklearn.metrics.pairwise import linear_kernel, rbf_kernel, polynomial_kernel
 
 class RVC:
+    """
 
+        Relevance Vector Machine - Classification
+        
+    """
     def __init__(
         self,
         kernel='rbf',

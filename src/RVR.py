@@ -2,8 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics.pairwise import linear_kernel, rbf_kernel, polynomial_kernel
 
-class RVM:
+class RVR:
+    """
 
+        Relevance Vector Machine - Regression
+
+    """
     def __init__(
         self,
         kernel='rbf',
