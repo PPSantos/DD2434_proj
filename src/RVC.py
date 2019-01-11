@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 from scipy.special import expit
 from sklearn.metrics.pairwise import linear_kernel, rbf_kernel, polynomial_kernel
 
+from tqdm import tqdm_notebook as tqdm
+
+from scipy.optimize import minimize
+
 class RVC:
     """
 
@@ -12,11 +16,10 @@ class RVC:
     def __init__(
         self,
         kernel='rbf',
-        coef0=0.01,
+        coef0=None,
         em_tol=1e-3,
         alpha=1e-6,
-        threshold_alpha=1e5,
-        update_sigma=False,
+        threshold_alpha=1e9,
         verbose=False
         ):
 
@@ -35,7 +38,6 @@ class RVC:
         # Alphas pruning threshold.
         self.threshold_alpha = threshold_alpha
 
-        self.update_sigma = update_sigma
         self.verbose = verbose
         
         # Diagonal matrix of sigmoid gradient
@@ -80,38 +82,6 @@ class RVC:
         else:
             raise ValueError('Undefined kernel.')
 
-    
-    def linear_spline_kernel(self, X, Y):
-        """
-            Linear spline kernel.
-        """
-        phi = np.zeros((X.shape[0], Y.shape[0]))
-        
-        for i in range(phi.shape[0]):
-            for j in range(phi.shape[1]):
-                x = X[i]
-                y = Y[j]
-                phi[i,j] = 1 + x*y + x*y*min(x,y) - \
-                ((x+y)*min(x,y)**2)/2 + np.power(min(x,y),3)/3
-        
-        return phi
-    
-    def exponential_kernel(self, X, Y):
-        
-        phi = np.zeros((X.shape[0], Y.shape[0]))
-        
-        for i in range(phi.shape[0]):
-            for j in range(phi.shape[1]):
-                x_1 = X[i, 0]
-                x_2 = X[i, 1]
-                y_1 = Y[j, 0]
-                y_2 = Y[j, 1]
-                phi[i,j] = np.exp(-997e-4*(x_1-y_1)**2 - 2e-4*(x_2-y_2)**2)
-        
-        return phi
-        
-
-
     def fit(self, X, T):
         """
             Train.
@@ -132,24 +102,64 @@ class RVC:
         
         self.em()
         
-    def classify(self, m, phi):
-        return expit(np.dot(phi, m))
+    def classify(self, mu_posterior, phi):
+        return expit(np.dot(phi, mu_posterior))
 
-    def calc_posterior(self):
+    '''def calc_posterior(self):
         """
             Calculate posterior.
         """
-
+        
         phi = self.phi
         alphas = self.alphas
         T = self.T
+        mu_posterior = self.mu_posterior
+    
         
-        #B = 
+        y = self.classify(mu_posterior, phi)
+        B = np.diag(y*(1-y)) 
 
-        sigma_posterior = np.linalg.inv(np.dot(np.dot(phi.T, B), phi) + np.diag(alphas))
+        sigma_posterior = np.linalg.inv(np.diag(alphas) + np.dot(phi.T, np.dot(B, phi)))
         self.mu_posterior = np.dot(np.dot(sigma_posterior, np.dot(phi.T, B)), T)
 
-        return sigma_posterior, mu_posterior
+        return sigma_posterior'''
+    
+    def log_posterior(self, mu_posterior, alphas, phi, T):
+
+        y = self.classify(mu_posterior, phi)
+
+        log_p = -1 * (np.sum(np.log(y[T == 1]), 0) +
+                      np.sum(np.log(1-y[T == 0]), 0))
+        log_p = log_p + 0.5*np.dot(mu_posterior.T, np.dot(np.diag(alphas), mu_posterior))
+
+        jacobian = np.dot(np.diag(alphas), mu_posterior) - np.dot(phi.T, (T-y))
+
+        return log_p, jacobian
+
+    def hessian(self, mu_posterior, alphas, phi, T):
+        y = self.classify(mu_posterior, phi)
+        B = np.diag(y*(1-y))
+        return np.diag(alphas) + np.dot(phi.T, np.dot(B, phi))
+
+    def posterior(self):
+        result = minimize(
+            fun=self.log_posterior,
+            hess=self.hessian,
+            x0=self.mu_posterior,
+            args=(self.alphas, self.phi, self.T),
+            method='Newton-CG',
+            jac=True,
+            options={
+                'maxiter': 50
+            }
+        )
+
+        self.mu_posterior = result.x
+        sigma_posterior = np.linalg.inv(
+            self.hessian(self.mu_posterior, self.alphas, self.phi, self.T)
+        )
+        
+        return sigma_posterior
 
     def prune(self):
         """
@@ -160,6 +170,7 @@ class RVC:
         self.alphas = self.alphas[mask]
         self.old_alphas = self.old_alphas[mask]
         self.phi = self.phi[:, mask]
+        self.mu_posterior = self.mu_posterior[mask]
         
         if not self.removed_bias:
             self.relevance_vec = self.relevance_vec[mask[1:]]
@@ -176,25 +187,24 @@ class RVC:
         """
             EM.
         """
-        while(True):
+        #while(True):
+        for _ in tqdm(range(10000)):
             
             self.old_alphas = np.copy(self.alphas)
             
-            sigma_posterior, mu_posterior = self.calc_posterior()
+            #sigma_posterior = self.calc_posterior()
+            sigma_posterior = self.posterior()
+            
 
             gammas = 1 - self.alphas * np.diag(sigma_posterior)
-            self.alphas = gammas / (mu_posterior**2)
-
-            # Update sigma.
-            if self.update_sigma:
-                #N = self.alphas.shape[0] - 1
-                self.sigma = (self.N - np.sum(gammas))/(
-                        np.sum((self.T - np.dot(self.phi, mu_posterior)) ** 2))
+            self.alphas = gammas / (self.mu_posterior**2)
             
             self.prune()
+            #print("relev : ", self.relevance_vec.shape)
 
             difference = np.amax(np.abs(self.alphas - self.old_alphas))
             
+            #print("diff : ", difference)
             if difference < self.em_tol:
                 if self.verbose:
                     print("EM finished")
@@ -206,6 +216,4 @@ class RVC:
         phi = self.kernel(X, self.relevance_vec)
         y = self.classify(self.mu_posterior, phi)
         
-        print(y)
-        
-        return None
+        return y
