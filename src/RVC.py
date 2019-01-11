@@ -217,3 +217,10 @@ class RVC:
         y = self.classify(self.mu_posterior, phi)
         
         return y
+    
+    def predict(self, X):
+        
+        y = self.predict_proba(X)
+        pred = np.where(y > 0.5, 1, 0)
+        
+        return pred
