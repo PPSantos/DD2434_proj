@@ -214,6 +214,11 @@ class RVC:
     def predict_proba(self, X):
         
         phi = self.kernel(X, self.relevance_vec)
+        
+        if not self.removed_bias:
+            bias_trick = np.ones((X.shape[0], 1))
+            phi = np.hstack((bias_trick, phi))
+            
         y = self.classify(self.mu_posterior, phi)
         
         return y
